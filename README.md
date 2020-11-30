@@ -18,7 +18,9 @@ Studio isn't only a library, it's a framework. It's really important to learn ho
 I would love to receive feedback.Let me know if you've used it. What worked and what is wrong. Contribute and spread the word.
 
 
-Wants to learn more???? Join our slack channel: https://studiojs.slack.com/admin/shared_invites
+Wants to learn more???? Click here to join our slack channel 
+
+[![Join the StudioJS chat](https://studiojs.herokuapp.com/badge.svg)](https://studiojs.herokuapp.com/)
 
 [![Build Status](https://travis-ci.org/ericholiveira/studio.svg?branch=master)](https://travis-ci.org/ericholiveira/studio)
 [![npm version](https://badge.fury.io/js/studio.svg)](http://badge.fury.io/js/studio)
@@ -37,12 +39,13 @@ Table of contents
 - [Modules / namespacing](#modules)
 - [Co / Generators and flow-control](#generators)
 - [Proxy](#proxy)
+- [Es6 Class](#es6-class)
 - [Plugins](#plugins)
 - [Filters](#filters)
 - [Timeouts](#timeouts)
 - [Realtime metrics](#realtime-metrics)
+- [Retry](#retry)
 - [Clustering](#cluster)
-- [TODO](#todo)
 - [Pro tips](#pro-tips)
 - [From Zero To Hero](#from-zero-to-hero)
 - [Dependencies](#dependencies)
@@ -68,7 +71,7 @@ Studio encourages you to use the best practices of nodejs, it helps you to write
 
 First of all, everything in a Studio-based application is a service.
 
-So if you're used to build SOA or micro-services all your services (and possible layers, as DAOs for instance) are going to be declared as a STATELESS SINGLETON services. Services have an unique identifier and communicate (always) asynchronously through message passing. The benefits of this approach is that it is really easy to take just some of your servers to different servers and make a better use of it. Also, your services have the free benefit of deep copying the parameters before the message is delivered (so one service can't mess with the objects of another service) increasing your code security.
+So if you're used to build SOA or micro-services all your services (and possible layers, as DAOs for instance) are going to be declared as a STATELESS SINGLETON services. Services have an unique identifier and communicate (always) asynchronously through message passing. The benefits of this approach is that it is really easy to take just some of your services to different servers and make a better use of it. Also, your services have the free benefit of deep copying the parameters before the message is delivered (so one service can't mess with the objects of another service) increasing your code security.
 
 And this is it... this is all you need to create [reactive](http://reactivemanifesto.org) applications.
 
@@ -121,7 +124,7 @@ myFirstServiceRef().then(function(result){
 });
 ```
 
-You service can receive any number of arguments
+Your service can receive any number of arguments.
 And also, you can get a reference to a service even if it was not instantiated yet (you only need it when calling) as in:
 
 
@@ -184,6 +187,12 @@ allServices.myFirstServiceWithGenerator().then(function(result){
 	console.log(result); //Prints Hello World with Generators
 });
 ```
+
+You can enable Studio logs via environment variable:
+```bash
+DEBUG=Studio node my-studio-app.js
+```
+
 
 Examples
 ========
@@ -353,6 +362,33 @@ allServices.myFirstServiceWithGenerator().then(function(result){
 });
 ```
 
+Es6 Class
+========
+
+If you're running on node >=4 or using --harmony flag, you can create your services easier:
+```js
+var Studio = require('studio');
+class Foo{
+	bar(){
+		return this.hello();
+	}
+	hello(){
+		return 'hello';
+	}
+	useExternal(){
+		var someExternalService = Studio('someExternalService');
+		return someExternalService();
+	}
+}
+Studio.serviceClass(Foo);
+
+//To acess from outside or other classes
+var fooModule = Studio.module('Foo');
+var barService = fooModule('bar');
+barService();
+```
+
+This way Studio automatically creates a namespace with the class name and a service for each function of this class
 
 Plugins
 ========
@@ -422,37 +458,91 @@ Real time metrics
 =================
 
 One of the cool things you can do with Studio plugins is to have real time metrics of all your services, if you want to log
-the time needed to execute on every call of every service you can do it easily with the timer plugin. This plugin also
-shows you the power you can take from custom plugin and [aspect programming](https://en.wikipedia.org/wiki/Aspect-oriented_programming)
+the time needed to execute every call of every service you can do it easily with the timer plugin. This plugin also
+shows you the power you can get from a custom plugin and [aspect-oriented programming](https://en.wikipedia.org/wiki/Aspect-oriented_programming)
+
+The timer plugin uses process.hrtime() for sub-millisecond precision.
 
 ```js
 var Studio = require('studio');
+
 Studio.use(Studio.plugin.timer(function(res){
     /*
-    here you define what to do with the execution info, now we are going just to print in the console, but
-    in production you probably will wants to send it to statsd of some other metric aggregator
-    */
-    console.log(res);//Prints the time taken on service execution and other infos
+     * Here you define what to do with the execution info, now we are going just to print in the console, but
+     * in production you could send it to statsd or some other metric aggregator.
+     */
+    console.log('The receiver %s took %d ms to execute', res.receiver, res.time);
 }));
+
 Studio(function myService(){
 	var randomTime = Math.floor(Math.random()*100);
+
+    // Time in milliseconds
     return Studio.promise.delay(randomTime);
-});//Time in milliseconds
+});
 
 var myServiceRef = Studio('myService');
 
-setInterval(myServiceRef,500);
+setInterval(myServiceRef, 500);
 ```
+
+Retry
+=====
+
+Studio supports retry a service call in the occurrence of error.
+
+```js
+var Studio = require('studio');
+
+Studio.use(Studio.plugin.retry());
+
+Studio(function myService(){
+	throw new Error('');
+}).retry({max:2});
+
+var myServiceRef = Studio('myService');
+
+setInterval(myServiceRef, 500);
+```
+
+It supports multiple configurations, and all can be applied for all services and overriden for individual services.
+
+```js
+var Studio = require('studio');
+
+Studio.use(Studio.plugin.retry({max:3})); //set the service to retry 3 times as default 
+
+Studio(function myService(){
+	throw new Error('');
+}).retry({max:2}); //set the service to retry 2 times
+
+Studio(function myOtherService(){
+	throw new Error('');
+}).retry();//set the service to retry. Will use the default max attempts 
+
+Studio(function yetAnotherService(){
+	throw new Error('');
+}); // this service will never retry (YOU MUST CALL .retry() to enable retry)
+
+var myServiceRef = Studio('myService');
+
+setInterval(myServiceRef, 500);
+```
+
+
+Name                | Description                                                                                                      | Default
+--------------------|------------------------------------------------------------------------------------------------------------------|---------------
+max                 | Number of retry attempts                                                                                         | 0
+filter              | A function to filter certain errors from retry (must return a boolean)                                           | retry for all errors
+initialInterval     | Interval between retries                                                                                         | 0
+factor              | A multiplication factor between retries                                                                          | 1
+beforeCall          | Function called BEFORE every service call, can be used to support stateful retries                               | -
+afterCall           | Function called AFTER all retries, can be used to support stateful retries (called on both, success and failures | -
 
 Cluster
 ========
 
 To clusterize your application without any configuration you need to add the [studio-cluster](https://github.com/ericholiveira/studio-cluster) plugin, follow the link to see how to use and examples of implementations, like the [distributed merge sort](https://github.com/ericholiveira/studio-cluster/tree/master/examples/mergesort)
-
-TODO
-========
-
-> Create a plugin to support browser communication (this way users can call services from the browser as local services)
 
 Pro tips
 ========
@@ -465,9 +555,11 @@ From Zero To Hero
 
 I've also started a series of posts on my medium explaining the motivation and creating a small project with studio
 
-[Nodejs microservices. From Zero to Hero Pt1](https://medium.com/@ericholiveira/nodejs-microservices-from-zero-to-hero-pt1-279548cb4080)
+[Nodejs microservices. From Zero to Hero Pt1 - Motivation](https://medium.com/@ericholiveira/nodejs-microservices-from-zero-to-hero-pt1-279548cb4080)
 
-[Nodejs microservices. From Zero to Hero Pt2](https://medium.com/@ericholiveira/nodejs-microservices-from-zero-to-hero-pt2-72fbb2a1b1c4#.dpz6adn7c)
+[Nodejs microservices. From Zero to Hero Pt2 - Basic Usage](https://medium.com/@ericholiveira/nodejs-microservices-from-zero-to-hero-pt2-72fbb2a1b1c4#.dpz6adn7c)
+
+[Nodejs microservices. From Zero to Hero Pt3 - Plugins and cluster](https://medium.com/@ericholiveira/nodejs-microservices-from-zero-to-hero-pt1-plugins-and-clustering-ddb60e9a8ee0#.v3m1jh2l5)
 
 Dependencies
 ========
